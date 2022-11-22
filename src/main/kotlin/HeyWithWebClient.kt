@@ -1,6 +1,7 @@
-
 import com.xenomachina.argparser.SystemExitException
 import io.netty.channel.ChannelOption
+import io.netty.handler.ssl.SslContextBuilder
+import io.netty.handler.ssl.util.InsecureTrustManagerFactory
 import io.netty.handler.timeout.ReadTimeoutHandler
 import io.netty.handler.timeout.WriteTimeoutHandler
 import kotlinx.coroutines.*
@@ -11,6 +12,7 @@ import reactor.netty.resources.ConnectionProvider
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.Duration
+import java.util.UUID
 import java.util.concurrent.*
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.LongAdder
@@ -18,11 +20,12 @@ import java.util.regex.Pattern
 import kotlin.math.roundToInt
 import kotlin.random.Random
 
+
 @OptIn(ExperimentalCoroutinesApi::class)
 fun heyWithWebClient(parsedArgs: HeyArgs) {
-    val httpPattern = Pattern.compile("^(?<baseUrl>http://[^/]+)(?<endpoint>.*)$")
+    val httpPattern = Pattern.compile("^(?<baseUrl>http[s]?://[^/]+)(?<endpoint>.*)$")
     val variableInt = Pattern.compile(".*(?<placeholder>\\{int\\((?<from>\\d+)\\s*,\\s*(?<to>\\d+)\\)\\}).*")
-
+    val variableUuid = Pattern.compile(".*(?<placeholder>\\{uuid\\(\\s*\\)\\}).*")
 
     parsedArgs.run {
         if (url == null) {
@@ -48,21 +51,7 @@ fun heyWithWebClient(parsedArgs: HeyArgs) {
 
         println("Base URL: $baseUrl")
         println("Endpoint: $endpoint")
-        val timeoutMilliseconds = timeout.toInt() * 1000L
-        val connectionProvider = ConnectionProvider.builder("myConnectionPool")
-            .maxConnections(concurrentCount)
-            .pendingAcquireMaxCount(concurrentCount).build();
-        val httpClient = reactor.netty.http.client.HttpClient.create(connectionProvider)
-            .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 5000)
-            .responseTimeout(Duration.ofMillis(timeoutMilliseconds))
-            .doOnConnected { conn ->
-                conn.addHandlerLast(ReadTimeoutHandler(timeoutMilliseconds, TimeUnit.MILLISECONDS))
-                    .addHandlerLast(WriteTimeoutHandler(timeoutMilliseconds, TimeUnit.MILLISECONDS))
-            }
-        val client = WebClient.builder()
-            .clientConnector(ReactorClientHttpConnector(httpClient))
-            .baseUrl(baseUrl)
-            .build()
+
         val producerQueue = LinkedBlockingQueue<String>()
 
         m = variableInt.matcher(endpoint)
@@ -74,19 +63,32 @@ fun heyWithWebClient(parsedArgs: HeyArgs) {
             repeat(number) {
                 GlobalScope.launch {
                     val newEndpoint = endpoint.replace(placeholder, "${Random.nextInt(from, to)}")
-                    producerQueue.add(newEndpoint)
+                    producerQueue.put(newEndpoint)
                 }
             }
         } else {
-            repeat(number) {
-                GlobalScope.launch {
-                    producerQueue.add(endpoint)
+            m = variableUuid.matcher(endpoint)
+            if (m.matches()) {
+                val placeholder = m.group("placeholder")
+                println("Expecting random uuid()")
+                repeat(number) {
+                    GlobalScope.launch {
+                        val newEndpoint = endpoint.replace(placeholder, UUID.randomUUID().toString())
+                        producerQueue.put(newEndpoint)
+                    }
+                }
+            } else {
+                repeat(number) {
+                    GlobalScope.launch {
+                        producerQueue.put(endpoint)
+                    }
                 }
             }
         }
 
+        val client = prepareWebClient(baseUrl, timeout, concurrentCount)
         val list = ConcurrentLinkedQueue<Pair<Int, Long>>()
-        val limitingQueue = LinkedBlockingQueue<Int>(concurrentCount)
+        val throttlingQueue = LinkedBlockingQueue<Int>(concurrentCount)
         val errorMap = ConcurrentHashMap<String, Int>()
         val errors = ConcurrentLinkedQueue<String>()
 
@@ -99,40 +101,41 @@ fun heyWithWebClient(parsedArgs: HeyArgs) {
         runBlocking(Dispatchers.IO.limitedParallelism(2)) {
             repeat(number) {
                 launch {
-                    var overflow = false
-                    var enqueueSuccessful = false
-                    while (!enqueueSuccessful) {
-                        enqueueSuccessful = try {
-                            limitingQueue.add(1)
-                            true
-                        } catch (e: IllegalStateException) {
-                            delay(1)
-                            overflow = true
-                            false
-                        }
-                    }
-                    if (overflow) overflowCount.increment()
-                    val currentEndpoint = producerQueue.poll()
+                    val waitQueueStartTime = System.currentTimeMillis()
+                    throttlingQueue.put(1)
+                    val waitQueueEndTime = System.currentTimeMillis()
+                    overflowCount.add(waitQueueEndTime - waitQueueStartTime)
+
+                    val currentEndpoint = producerQueue.take()
 
                     val startTime = System.currentTimeMillis()
 
                     client.get().uri(currentEndpoint).exchangeToMono { resp ->
-                        val status =
-                            if (resp.statusCode().is2xxSuccessful) {
-                                resp.statusCode().value()
-                            } else {
-                                resp?.statusCode()?.value()?:504
-                            }
+                        val status = resp.statusCode().value()
 
-                        val endTime = System.currentTimeMillis()
-                        list.add(Pair(status, endTime - startTime))
+                        onCompleteOrException(
+                            status = status,
+                            startTime = startTime,
+                            errors = errors,
+                            list = list,
+                            exception = null)
                         Mono.empty<String>()
-                    }.doOnError{ e ->
-                        val endTime = System.currentTimeMillis()
-                        list.add(Pair(504, endTime - startTime))
-                        errors.add(e.message)
+                    }.onErrorComplete {e->
+                        val status = if (e.message != null && e.message!!.startsWith("Connection refused")) {
+                            503
+                        } else {
+                            504
+                        }
+
+                        onCompleteOrException(
+                            status = status,
+                            startTime = startTime,
+                            errors = errors,
+                            list = list,
+                            exception = e)
+                        true
                     }.doFinally {
-                        limitingQueue.poll()
+                        throttlingQueue.take()
                         consumerLatch.countDown()
                         val percentage = BigDecimal.valueOf(consumerLatch.count / number.toDouble() * 100).setScale(2, RoundingMode.HALF_UP).toPlainString()
                         val totalElapsed = System.currentTimeMillis() - totalStartTime
@@ -165,13 +168,14 @@ fun heyWithWebClient(parsedArgs: HeyArgs) {
             }
         }
 
-
-        println("\nTotal time: ${(totalEndTime - totalStartTime) / 1000.0} seconds")
+        val totalSeconds = (totalEndTime - totalStartTime) / 1000.0
+        println("\nTotal time: $totalSeconds seconds")
+        println("QPS: ${roundTo2Digits(number / totalSeconds)} queries per second")
         println(countTable)
         println("Max time: ${maxTime.get()/1000.0} seconds")
         println("Min time: ${minTime.get()/1000.0} seconds")
 
-        println("Full concurrency time count: ${overflowCount.sum()}")
+        println("Full concurrency CPU waiting time total: ${overflowCount.sum() / 1000.0} seconds. (Could be more than total time because there are more than 1 CPUs)")
 
         if (errors.isEmpty()) {
             println("Congratulations! No error found!")
@@ -193,4 +197,47 @@ fun heyWithWebClient(parsedArgs: HeyArgs) {
         }
     }
 
+}
+
+fun roundTo2Digits(d: Double): Double {
+    return (d * 100).roundToInt() / 100.0
+}
+
+fun onCompleteOrException(
+    status: Int,
+    startTime: Long,
+    list: ConcurrentLinkedQueue<Pair<Int, Long>>,
+    errors: ConcurrentLinkedQueue<String>,
+    exception: Throwable?) {
+    val endTime = System.currentTimeMillis()
+    list.add(Pair(status, endTime - startTime))
+    if (exception != null) {
+        errors.add(exception.message)
+    }
+}
+
+fun prepareWebClient(baseUrl: String, timeout: Long, concurrentCount: Int): WebClient {
+    val timeoutMilliseconds = timeout.toInt() * 1000L
+    val connectionProvider = ConnectionProvider.builder("myConnectionPool")
+        .maxConnections(concurrentCount)
+        .pendingAcquireMaxCount(concurrentCount).build()
+    var httpClient = reactor.netty.http.client.HttpClient.create(connectionProvider)
+        .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 5000)
+        .responseTimeout(Duration.ofMillis(timeoutMilliseconds))
+        .doOnConnected { conn ->
+            conn.addHandlerLast(ReadTimeoutHandler(timeoutMilliseconds, TimeUnit.MILLISECONDS))
+                .addHandlerLast(WriteTimeoutHandler(timeoutMilliseconds, TimeUnit.MILLISECONDS))
+        }
+    if (baseUrl.startsWith("https:")) {
+        httpClient = httpClient.secure{ t ->
+            t.sslContext(SslContextBuilder.forClient()
+                .trustManager(InsecureTrustManagerFactory.INSTANCE)
+                .build())
+        }
+    }
+
+    return WebClient.builder()
+        .clientConnector(ReactorClientHttpConnector(httpClient))
+        .baseUrl(baseUrl)
+        .build()
 }
