@@ -1,4 +1,7 @@
+import com.xenomachina.argparser.ArgParser
 
-fun main(args: Array<String>) {
-    heyWithWebClient(args)
+import com.xenomachina.argparser.mainBody
+fun main(args: Array<String>) = mainBody {
+    val parsedArgs = ArgParser(args).parseInto(::HeyArgs)
+    heyWithWebClient(parsedArgs)
 }

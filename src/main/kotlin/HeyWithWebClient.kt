@@ -1,4 +1,5 @@
-import com.xenomachina.argparser.ArgParser
+
+import com.xenomachina.argparser.SystemExitException
 import io.netty.channel.ChannelOption
 import io.netty.handler.timeout.ReadTimeoutHandler
 import io.netty.handler.timeout.WriteTimeoutHandler
@@ -17,17 +18,23 @@ import java.util.regex.Pattern
 import kotlin.math.roundToInt
 import kotlin.random.Random
 
-
 @OptIn(ExperimentalCoroutinesApi::class)
-fun heyWithWebClient(args: Array<String>) {
+fun heyWithWebClient(parsedArgs: HeyArgs) {
     val httpPattern = Pattern.compile("^(?<baseUrl>http://[^/]+)(?<endpoint>.*)$")
     val variableInt = Pattern.compile(".*(?<placeholder>\\{int\\((?<from>\\d+)\\s*,\\s*(?<to>\\d+)\\)\\}).*")
-    ArgParser(args).parseInto(::HeyArgs).run {
+
+
+    parsedArgs.run {
+        if (url == null) {
+            throw SystemExitException("Please try -h or --help to see the usage", 0)
+        }
+
         println("Total number of requests: $number")
         println("Concurrent: $concurrentCount")
         println("URL: $url")
         println("Http Timeout: $timeout seconds")
         System.setProperty("logging.level.root", "OFF")
+
         var m = httpPattern.matcher(url)
         var baseUrl: String?
         var endpoint: String?
