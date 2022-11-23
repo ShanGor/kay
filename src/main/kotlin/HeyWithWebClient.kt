@@ -222,7 +222,7 @@ fun prepareWebClient(baseUrl: String, timeout: Long, concurrentCount: Int): WebC
         .maxConnections(concurrentCount)
         .pendingAcquireMaxCount(concurrentCount).build()
     var httpClient = reactor.netty.http.client.HttpClient.create(connectionProvider)
-        .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 5000)
+        .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 10_000)
         .responseTimeout(Duration.ofMillis(timeoutMilliseconds))
         .doOnConnected { conn ->
             conn.addHandlerLast(ReadTimeoutHandler(timeoutMilliseconds, TimeUnit.MILLISECONDS))

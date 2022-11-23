@@ -1,5 +1,12 @@
 # Load Runner by Kotlin
 
+## Build
+- Build with maven first
+  > mvn clean package
+- Build native image
+  - Open `X64 Native Tools Command Prompt for VS2022` (Ensure the VS2022 is installed with English, if Chinese, will fail)
+  - In the command prompt, change directory to the kay folder, run the `build-native.bat`
+
 ## Usage
 - With random integer parameter in the URL  
   Below case is to generate random number from 1 to 1 million, generated randomly as an userId.

@@ -1,0 +1,1 @@
+native-image --verbose -O3 -jar target\kay-1.0-jar-with-dependencies.jar -o kay --initialize-at-run-time=io.netty.handler.ssl.BouncyCastleAlpnSslUtils,io.netty.channel.epoll.Epoll,io.netty.channel.epoll.Native
