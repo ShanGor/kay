@@ -55,36 +55,33 @@ fun heyWithWebClient(parsedArgs: HeyArgs) {
         val producerQueue = LinkedBlockingQueue<String>()
 
         m = variableInt.matcher(endpoint)
-        if (m.matches()) {
-            val from = m.group("from").toInt()
-            val to = m.group("to").toInt()
-            val placeholder = m.group("placeholder")
-            println("Random int id is from `$from` to `$to`")
-            repeat(number) {
-                GlobalScope.launch {
+        GlobalScope.launch(Dispatchers.IO.limitedParallelism(1)) {
+            if (m.matches()) {
+                val from = m.group("from").toInt()
+                val to = m.group("to").toInt()
+                val placeholder = m.group("placeholder")
+                println("Random int id is from `$from` to `$to`")
+                repeat(number) {
                     val newEndpoint = endpoint.replace(placeholder, "${Random.nextInt(from, to)}")
                     producerQueue.put(newEndpoint)
                 }
-            }
-        } else {
-            m = variableUuid.matcher(endpoint)
-            if (m.matches()) {
-                val placeholder = m.group("placeholder")
-                println("Expecting random uuid()")
-                repeat(number) {
-                    GlobalScope.launch {
+            } else {
+                m = variableUuid.matcher(endpoint)
+                if (m.matches()) {
+                    val placeholder = m.group("placeholder")
+                    println("Expecting random uuid()")
+                    repeat(number) {
                         val newEndpoint = endpoint.replace(placeholder, UUID.randomUUID().toString())
                         producerQueue.put(newEndpoint)
                     }
-                }
-            } else {
-                repeat(number) {
-                    GlobalScope.launch {
+                } else {
+                    repeat(number) {
                         producerQueue.put(endpoint)
                     }
                 }
             }
         }
+
 
         val client = prepareWebClient(baseUrl, timeout, concurrentCount)
         val list = ConcurrentLinkedQueue<Pair<Int, Long>>()

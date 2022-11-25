@@ -3,6 +3,11 @@
 ## Build
 - Build with maven first
   > mvn clean package
+  > 
+  Then you should run the jar with agent to generate specifications:
+  ```
+  $GRAAL_HOME\bin\java -agentlib:native-image-agent=config-output-dir=C:\sandbox\sources\git\kotlin\kay\src\main\resources\META-INF\native-image\cn.gzten\kay -jar C:\sandbox\sources\git\kotlin\kay\target\kay-1.0-jar-with-dependencies.jar
+  ```
 - Build native image
   - Open `X64 Native Tools Command Prompt for VS2022` (Ensure the VS2022 is installed with English, if Chinese, will fail)
   - In the command prompt, change directory to the kay folder, run the `build-native.bat`
