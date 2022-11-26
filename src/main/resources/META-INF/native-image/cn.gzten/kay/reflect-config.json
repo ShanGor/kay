@@ -781,13 +781,6 @@
   "name":"sun.security.x509.NetscapeCertTypeExtension",
   "methods":[{"name":"<init>","parameterTypes":["java.lang.Boolean","java.lang.Object"] }]
 },
-  {
-    "name":"java.lang.System",
-    "methods":[{"name":"console","parameterTypes":[] }]
-  },
-  {
-  "name":"org.fusesource.jansi.Ansi"
-},
 {
   "name":"sun.security.x509.PrivateKeyUsageExtension",
   "methods":[{"name":"<init>","parameterTypes":["java.lang.Boolean","java.lang.Object"] }]

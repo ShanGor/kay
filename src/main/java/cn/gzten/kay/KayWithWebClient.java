@@ -33,17 +33,20 @@ public class KayWithWebClient {
     private final ParsedUrl parsedUrl;
 
     private final LinkedBlockingQueue<String> producerQueue = new LinkedBlockingQueue<>();
-    private final WebClient client;
+    private final WebClient httpClient;
 
     private final ConcurrentLinkedQueue<Pair<Integer, Long>> list;
     private final LinkedBlockingQueue<Integer> throttlingQueue;
-    private final ConcurrentHashMap<String, Integer> errorMap;
-    private final ConcurrentLinkedQueue<String> errors;
+    private final ConcurrentHashMap<String, Integer> errorReport;
+    private final ConcurrentLinkedQueue<String> requestErrors;
 
-    private final long totalStartTime;
+    private final long overallStartTime;
 
-    private final LongAdder overflowCount;
+    private final LongAdder taskOverflowCount;
 
+    /**
+     * To control the
+     */
     private final CountDownLatch consumerLatch;
 
     public KayWithWebClient(String url, int concurrentCount, int number, long timeout) {
@@ -66,25 +69,25 @@ public class KayWithWebClient {
         out.printf("Base URL: %s%n", parsedUrl.baseUrl());
         out.printf("Endpoint: %s%n", parsedUrl.endpoint());
 
-        client = prepareWebClient(parsedUrl.baseUrl(), timeout, concurrentCount);
+        httpClient = prepareWebClient(parsedUrl.baseUrl(), timeout, concurrentCount);
         list = new ConcurrentLinkedQueue<>();
         throttlingQueue = new LinkedBlockingQueue<>(concurrentCount);
-        errorMap = new ConcurrentHashMap<>();
-        errors = new ConcurrentLinkedQueue<>();
+        errorReport = new ConcurrentHashMap<>();
+        requestErrors = new ConcurrentLinkedQueue<>();
 
-        totalStartTime = System.currentTimeMillis();
+        overallStartTime = System.currentTimeMillis();
 
-        overflowCount = new LongAdder();
+        taskOverflowCount = new LongAdder();
 
         consumerLatch = new CountDownLatch(number);
     }
 
     public int run(int parallelismToIssueAsyncRequests) throws InterruptedException {
         // Produce endpoints, endpoints could be variable
-        Thread.ofVirtual().name("produceUrlsThread").start(() -> produceEndpoints(producerQueue, parsedUrl.endpoint(), totalRequestNumber));
+        Thread.ofPlatform().name("produceUrlsThread").start(() -> produceEndpoints(producerQueue, parsedUrl.endpoint(), totalRequestNumber));
 
         // Issue requests
-        try(var executor = Executors.newFixedThreadPool(parallelismToIssueAsyncRequests, Thread.ofVirtual().factory())) {
+        try(var executor = Executors.newFixedThreadPool(parallelismToIssueAsyncRequests, Thread.ofPlatform().factory())) {
             for (int i = 0; i< totalRequestNumber; i++) {
                 executor.submit(this::issueAnHttpRequest);
             }
@@ -106,16 +109,16 @@ public class KayWithWebClient {
             throttlingQueue.put(1);
 
             var waitQueueEndTime = System.currentTimeMillis();
-            overflowCount.add(waitQueueEndTime - waitQueueStartTime);
+            taskOverflowCount.add(waitQueueEndTime - waitQueueStartTime);
 
             var currentEndpoint = producerQueue.take();
 
             var startTime = System.currentTimeMillis();
 
-            client.get().uri(currentEndpoint).exchangeToMono ( resp -> {
+            httpClient.get().uri(currentEndpoint).exchangeToMono (resp -> {
                 var status = resp.statusCode().value();
 
-                onCompleteOrException(status, startTime, list, errors, null);
+                onCompleteOrException(status, startTime, list, requestErrors, null);
                 return Mono.empty();
             }).onErrorComplete (e-> {
                 int status;
@@ -125,13 +128,13 @@ public class KayWithWebClient {
                     status = 504;
                 }
 
-                onCompleteOrException(status, startTime, list, errors, e);
+                onCompleteOrException(status, startTime, list, requestErrors, e);
                 return true;
             }).doFinally (signalType -> {
                 try {
                     throttlingQueue.take();
                     var percentage = BigDecimal.valueOf(consumerLatch.getCount() * 100.0 / totalRequestNumber).setScale(2, RoundingMode.HALF_UP);
-                    var totalElapsed = System.currentTimeMillis() - totalStartTime;
+                    var totalElapsed = System.currentTimeMillis() - overallStartTime;
                     var etc = totalElapsed / (100.0 - percentage.doubleValue())  / 1000 * percentage.doubleValue();
                     out.print(MessageFormat.format("\r{0}% tasks left, estimated time to complete is {1} seconds..", percentage, (int)etc));
                 } catch (InterruptedException e) {
@@ -165,22 +168,22 @@ public class KayWithWebClient {
             }
         });
 
-        var totalSeconds = (totalEndTime - totalStartTime) / 1000.0;
+        var totalSeconds = (totalEndTime - overallStartTime) / 1000.0;
         out.printf("\nTotal time: %.3f seconds%n", totalSeconds);
         out.printf("QPS: %.2f queries per second%n", roundTo2Digits(totalRequestNumber / totalSeconds));
         out.println(countTable);
         out.printf("Max time: %.3f seconds%n", maxTime.get()/1000.0);
         out.printf("Min time: %.3f seconds%n", minTime.get()/1000.0);
 
-        out.printf("Full concurrency CPU waiting time total: %.3f seconds. (Could be more than total time because there are more than 1 CPUs)%n", overflowCount.sum() / 1000.0);
+        out.printf("Full concurrency CPU waiting time total: %.3f seconds. (Could be more than total time because there are more than 1 CPUs)%n", taskOverflowCount.sum() / 1000.0);
 
-        if (errors.isEmpty()) {
+        if (requestErrors.isEmpty()) {
             out.println("Congratulations! No error found!");
         } else {
-            errors.forEach( msg -> accumulateCounterMap(errorMap, msg));
+            requestErrors.forEach(msg -> accumulateCounterMap(errorReport, msg));
 
             out.println("Errors statistics: [Counts]: [Error message] ");
-            errorMap.entrySet().stream()
+            errorReport.entrySet().stream()
                     .sorted((a, b) -> b.getValue().compareTo(a.getValue()))
                     .forEach(entry -> out.printf("\t[%d]: %s%n", entry.getValue(), entry.getKey()));
         }

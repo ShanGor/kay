@@ -15,5 +15,17 @@
     {"name":"threadAllocatedMemorySupport"}, 
     {"name":"threadContentionMonitoringSupport"}
   ]
-}
+},
+  {
+    "name":"sun.net.dns.ResolverConfigurationImpl",
+    "fields":[
+      {"name":"os_searchlist"},
+      {"name":"os_nameservers"}
+    ],
+    "methods": [
+      {"name":  "loadDNSconfig0"},
+      {"name":  "init0"},
+      {"name":  "notifyAddrChange0"}
+    ]
+  }
 ]

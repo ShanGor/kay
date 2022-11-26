@@ -2,5 +2,6 @@
 <configuration>
     <include resource="org/springframework/boot/logging/logback/base.xml" />
     <logger name="reactor.netty" level="OFF"/>
+    <logger name="io.netty" level="OFF" />
     <root level="OFF"></root>
 </configuration>
