@@ -1,7 +1,5 @@
 {
   "resources":{
-  "includes":[{
-      "pattern":"\\Qorg/springframework/http/codec/CodecConfigurer.properties\\E"
-    }]},
+  "includes":[]},
   "bundles":[]
 }
