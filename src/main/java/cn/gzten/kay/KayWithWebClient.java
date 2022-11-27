@@ -13,8 +13,6 @@ import reactor.core.publisher.Mono;
 import reactor.netty.resources.ConnectionProvider;
 
 import javax.net.ssl.SSLException;
-import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.text.MessageFormat;
 import java.time.Duration;
 import java.util.*;
@@ -84,9 +82,9 @@ public class KayWithWebClient {
 
     public int run(int parallelismToIssueAsyncRequests) throws InterruptedException {
         // Produce endpoints, endpoints could be variable
-        Thread.ofPlatform().name("produceUrlsThread").start(() -> produceEndpoints(producerQueue, parsedUrl.endpoint(), totalRequestNumber));
+        Thread.ofVirtual().name("produceUrlsThread").start(() -> produceEndpoints(producerQueue, parsedUrl.endpoint(), totalRequestNumber));
 
-        // Issue requests
+        // Issue requests. Now it is using platform threads to do it, because virtual one here will get stuck in Native Image
         try(var executor = Executors.newFixedThreadPool(parallelismToIssueAsyncRequests, Thread.ofPlatform().factory())) {
             for (int i = 0; i< totalRequestNumber; i++) {
                 executor.submit(this::issueAnHttpRequest);
@@ -97,7 +95,7 @@ public class KayWithWebClient {
         }
 
         // Wait for requests to be completed and then produce report
-        consumerLatch.await();
+        consumerLatch.await(10, TimeUnit.SECONDS);
         out.println("\nConsumers done the job!");
         produceReport();
         return 0;
@@ -133,9 +131,9 @@ public class KayWithWebClient {
             }).doFinally (signalType -> {
                 try {
                     throttlingQueue.take();
-                    var percentage = BigDecimal.valueOf(consumerLatch.getCount() * 100.0 / totalRequestNumber).setScale(2, RoundingMode.HALF_UP);
+                    var percentage = roundTo2Digits(consumerLatch.getCount() * 100.0 / totalRequestNumber);
                     var totalElapsed = System.currentTimeMillis() - overallStartTime;
-                    var etc = totalElapsed / (100.0 - percentage.doubleValue())  / 1000 * percentage.doubleValue();
+                    var etc = totalElapsed / (100.0 - percentage)  / 1000 * percentage;
                     out.print(MessageFormat.format("\r{0}% tasks left, estimated time to complete is {1} seconds..", percentage, (int)etc));
                 } catch (InterruptedException e) {
                     throw new RuntimeException(e);

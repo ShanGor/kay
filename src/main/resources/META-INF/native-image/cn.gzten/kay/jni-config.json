@@ -27,5 +27,23 @@
       {"name":  "init0"},
       {"name":  "notifyAddrChange0"}
     ]
+  },
+  {
+    "name":"java.lang.VirtualThread",
+    "methods": [
+      {"name":  "registerNatives"},
+      {"name":  "notifyJvmtiUnmountEnd",
+        "parameterTypes": ["java.lang.Boolean"]
+      },
+      {"name":  "notifyJvmtiUnmountBegin",
+        "parameterTypes": ["java.lang.Boolean"]
+      },
+      {"name":  "notifyJvmtiMountEnd",
+        "parameterTypes": ["java.lang.Boolean"]
+      },
+      {"name":  "notifyJvmtiMountBegin",
+        "parameterTypes": ["java.lang.Boolean"]
+      }
+    ]
   }
 ]

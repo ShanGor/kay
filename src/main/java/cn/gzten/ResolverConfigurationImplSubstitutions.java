@@ -7,21 +7,16 @@ import com.oracle.svm.core.annotate.TargetClass;
 /**
  * @author Samuel Chan
  */
-//@TargetClass(sun.net.dns.ResolverConfigurationImpl.class)
-final class ResolverConfigurationImplSubstitutions {
-//    @Alias
-//    @InjectAccessors(ResolverConfigurationImplDnsListAccessor.class)
-    private static String os_nameservers;
-//    @Alias
-//    @InjectAccessors(ResolverConfigurationImplOsListAccessor.class)
-    private static String os_searchlist;
+@TargetClass(jdk.internal.misc.PreviewFeatures.class)
+final class PreviewFeaturesSubstitutions {
 
-    private static class ResolverConfigurationImplDnsListAccessor {
-        static String get() {
-            return "";
-        }
+    @Alias
+    @InjectAccessors(PreviewFeaturesEnabledAccessor.class)
+    private static boolean ENABLED;
 
-        static void set(String servers) {
+    private static class PreviewFeaturesEnabledAccessor {
+        static boolean get() {
+            return true;
         }
     }
 
