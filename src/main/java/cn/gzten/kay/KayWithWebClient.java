@@ -1,5 +1,6 @@
 package cn.gzten.kay;
 
+import cn.gzten.util.CliHistogram;
 import cn.gzten.util.Pair;
 import cn.gzten.util.ParsedUrl;
 import io.netty.channel.ChannelOption;
@@ -26,6 +27,8 @@ import static java.lang.System.out;
 public class KayWithWebClient {
     private static final Pattern VARIABLE_INT = Pattern.compile(".*(?<placeholder>\\{int\\((?<from>\\d+)\\s*,\\s*(?<to>\\d+)\\)\\}).*");
     private static final Pattern VARIABLE_UUID = Pattern.compile(".*(?<placeholder>\\{uuid\\(\\s*\\)\\}).*");
+
+    private static final String  BLANK_20 = " ".repeat(20);
     private final int totalRequestNumber;
 
     private final ParsedUrl parsedUrl;
@@ -95,7 +98,7 @@ public class KayWithWebClient {
         }
 
         // Wait for requests to be completed and then produce report
-        consumerLatch.await(10, TimeUnit.SECONDS);
+        consumerLatch.await();
         out.println("\nConsumers done the job!");
         produceReport();
         return 0;
@@ -134,7 +137,8 @@ public class KayWithWebClient {
                     var percentage = roundTo2Digits(consumerLatch.getCount() * 100.0 / totalRequestNumber);
                     var totalElapsed = System.currentTimeMillis() - overallStartTime;
                     var etc = totalElapsed / (100.0 - percentage)  / 1000 * percentage;
-                    out.print(MessageFormat.format("\r{0}% tasks left, estimated time to complete is {1} seconds..", percentage, (int)etc));
+
+                    out.print(MessageFormat.format("\r{0}% tasks left, estimated time to complete is {1} seconds..{2}", percentage, (int)etc, BLANK_20));
                 } catch (InterruptedException e) {
                     throw new RuntimeException(e);
                 } finally {
@@ -152,27 +156,51 @@ public class KayWithWebClient {
         var countTable = new HashMap<Integer, Integer>();
         var maxTime = new AtomicLong(0L);
         var minTime = new AtomicLong(100000L);
+        var successSumCount = new LongAdder();
+        var successSumTime = new LongAdder();
         list.forEach( element -> {
             var status = element.first();
             var milliseconds = element.second();
             accumulateCounterMap(countTable, status);
 
-            if (status == 200 && maxTime.get() < milliseconds) {
-                maxTime.set(milliseconds);
+            if (status < 500) {
+                successSumTime.add(milliseconds);
+                successSumCount.increment();
+                if (maxTime.get() < milliseconds) {
+                    maxTime.set(milliseconds);
+                }
+
+                if (minTime.get() > milliseconds) {
+                    minTime.set(milliseconds);
+                }
             }
 
-            if (status == 200 && minTime.get() > milliseconds) {
-                minTime.set(milliseconds);
-            }
         });
 
         var totalSeconds = (totalEndTime - overallStartTime) / 1000.0;
-        out.printf("\nTotal time: %.3f seconds%n", totalSeconds);
-        out.printf("QPS: %.2f queries per second%n", roundTo2Digits(totalRequestNumber / totalSeconds));
-        out.println(countTable);
-        out.printf("Max time: %.3f seconds%n", maxTime.get()/1000.0);
-        out.printf("Min time: %.3f seconds%n", minTime.get()/1000.0);
+        out.println();
+        out.println("Summary:");
+        out.printf("  Total: %.3f seconds%n", totalSeconds);
+        out.printf("  Slowest: %.3f seconds%n", maxTime.get()/1000.0);
+        out.printf("  Fastest: %.3f seconds%n", minTime.get()/1000.0);
+        out.printf("  Average: %.3f seconds%n", successSumTime.doubleValue() / successSumCount.doubleValue() / 1000);
+        out.printf("  Requests/sec: %.2f%n", roundTo2Digits(totalRequestNumber / totalSeconds));
 
+        out.println();
+        out.println("Response time histogram:");
+        produceHistogram(list);
+        out.println();
+        out.println("Latency distribution:");
+        statLatencyDistribution(list).forEach(p ->
+                out.printf("  %s in %.3f seconds\n", p.first(), p.second() / 1000.0));
+
+        out.println();
+        out.println("Status code distribution:");
+        countTable.entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(e -> {
+            out.printf("  [%d] %d responses%n", e.getKey(), e.getValue());
+        });
+
+        out.println();
         out.printf("Full concurrency CPU waiting time total: %.3f seconds. (Could be more than total time because there are more than 1 CPUs)%n", taskOverflowCount.sum() / 1000.0);
 
         if (requestErrors.isEmpty()) {
@@ -187,6 +215,67 @@ public class KayWithWebClient {
         }
     }
 
+    public static final List<Pair<String, Long>> statLatencyDistribution(Collection<Pair<Integer, Long>> list) {
+        var result = new LinkedList<Pair<String, Long>>();
+        var latencies = list.stream().filter(p -> p.first() < 500)
+                .sorted(Comparator.comparing(Pair::second))
+                .map(p -> p.second())
+                .toList();
+
+        var total = latencies.size();
+        switch (total) {
+            case 1 -> result.add(new Pair<>("100%", latencies.get(0)));
+            case 2 -> {
+                result.add(new Pair<>("50%", latencies.get(0)));
+                result.add(new Pair<>("100%", latencies.get(1)));
+            }
+            case 3 -> {
+                result.add(new Pair<>("33%", latencies.get(0)));
+                result.add(new Pair<>("66%", latencies.get(1)));
+                result.add(new Pair<>("100%", latencies.get(2)));
+            }
+            case 4 -> {
+                result.add(new Pair<>("25%", latencies.get(0)));
+                result.add(new Pair<>("50%", latencies.get(1)));
+                result.add(new Pair<>("75%", latencies.get(2)));
+                result.add(new Pair<>("100%", latencies.get(3)));
+            }
+            case 5 -> {
+                result.add(new Pair<>("20%", latencies.get(0)));
+                result.add(new Pair<>("40%", latencies.get(1)));
+                result.add(new Pair<>("60%", latencies.get(2)));
+                result.add(new Pair<>("80%", latencies.get(3)));
+                result.add(new Pair<>("100%", latencies.get(4)));
+            }
+            case 6 -> {
+                result.add(new Pair<>("16.66%", latencies.get(0)));
+                result.add(new Pair<>("33.33%", latencies.get(1)));
+                result.add(new Pair<>("50%", latencies.get(2)));
+                result.add(new Pair<>("66.66%", latencies.get(4)));
+                result.add(new Pair<>("83.33%", latencies.get(4)));
+                result.add(new Pair<>("100%", latencies.get(5)));
+            }
+            default -> {
+                result.add(new Pair<>("10%", latencies.get((int) (total * 0.1))));
+                result.add(new Pair<>("25%", latencies.get((int) (total * 0.25))));
+                result.add(new Pair<>("50%", latencies.get((int) (total * 0.5))));
+                result.add(new Pair<>("75%", latencies.get((int) (total * 0.75))));
+                result.add(new Pair<>("90%", latencies.get((int) (total * 0.9))));
+                result.add(new Pair<>("95%", latencies.get((int) (total * 0.95))));
+                result.add(new Pair<>("99%", latencies.get((int) (total * 0.99))));
+            }
+        }
+        return result;
+    }
+
+    public static final void produceHistogram(Collection<Pair<Integer, Long>> list) {
+        var map = new HashMap<Long, Integer>();
+        list.stream().filter(p -> p.first() < 500).forEach(p -> {
+            var timeCost = p.second()/10 * 10;
+            accumulateCounterMap(map, timeCost);
+        });
+        CliHistogram.printHistogram(map.entrySet().stream().sorted(Map.Entry.comparingByKey()).toList());
+    }
     /**
      * Produce endpoints for the consumer to start http requests.
      */

@@ -2,6 +2,7 @@ package cn.gzten;
 
 
 import cn.gzten.kay.KayWithWebClient;
+import cn.gzten.util.CliHistogram;
 import picocli.CommandLine;
 
 import java.util.concurrent.Callable;
@@ -26,8 +27,16 @@ public class KayCommand implements Callable<Integer> {
             description = "parallelism to issue async requests, default as 1. It is different from concurrency. Concurrency means active connections to the server, this param is the pace to send requests to the server, if it is high, could lead to `Connection refused` error!")
     private int parallelismToIssueAsyncRequests = 1;
 
+    @CommandLine.Option(names = {"-h", "--histogram-max-blocks"}, description = "histogram-max-blocks, default as 100.")
+    private int histogramMaxBlocks = 100;
+    @CommandLine.Option(names = {"-b", "--histogram-block-char"}, description = "histogram block char, default as *.")
+    private String histogramBlock = "*";
+
     @Override
     public Integer call() throws Exception {
+        CliHistogram.MAX_BLOCK = histogramMaxBlocks;
+        CliHistogram.BLOCK = String.valueOf(histogramBlock);
+
         return new KayWithWebClient(url, concurrency, number, timeout).run(parallelismToIssueAsyncRequests);
     }
 
