@@ -86,13 +86,13 @@
   ```
   java -jar my.jar -n 10000 -c 1000 http://localhost:8080/reports/{uuid()}
   ```
-
-## TODO
-- to support load parameters from a file.  
+- Load parameters from a file.  
   For example, below case the `ids.txt` is a text file, each line is an id number, in random manner.
   ```
   pgm -n <number> -c <concurrency> http://localhost:8080/reports/{@ids.txt}
   ```
+
+## TODO
 - to support http methods
 - to support -d "my data" format
 - to support -d @file format, will load the data to post

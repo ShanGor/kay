@@ -14,6 +14,10 @@ import reactor.core.publisher.Mono;
 import reactor.netty.resources.ConnectionProvider;
 
 import javax.net.ssl.SSLException;
+import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.text.MessageFormat;
 import java.time.Duration;
 import java.util.*;
@@ -25,8 +29,7 @@ import java.util.regex.Pattern;
 import static java.lang.System.out;
 
 public class KayWithWebClient {
-    private static final Pattern VARIABLE_INT = Pattern.compile(".*(?<placeholder>\\{int\\((?<from>\\d+)\\s*,\\s*(?<to>\\d+)\\)\\}).*");
-    private static final Pattern VARIABLE_UUID = Pattern.compile(".*(?<placeholder>\\{uuid\\(\\s*\\)\\}).*");
+    public static final Pattern VARIABLE_UUID = Pattern.compile(".*(?<placeholder>\\{uuid\\(\\s*\\)}).*");
 
     private static final String  BLANK_20 = " ".repeat(20);
     private final int totalRequestNumber;
@@ -46,7 +49,7 @@ public class KayWithWebClient {
     private final LongAdder taskOverflowCount;
 
     /**
-     * To control the
+     * To control the process progress.
      */
     private final CountDownLatch consumerLatch;
 
@@ -283,32 +286,75 @@ public class KayWithWebClient {
                                               final String endpoint,
                                               final int number) {
         try {
-            var matcherOfVarInt = VARIABLE_INT.matcher(endpoint);
-            if (matcherOfVarInt.matches()) {
-                var from = Integer.parseInt(matcherOfVarInt.group("from"));
-                var to = Integer.parseInt(matcherOfVarInt.group("to"));
-                var placeholder = matcherOfVarInt.group("placeholder");
+            var matchOfVarInt = tryPathVariableIntPattern(endpoint);
+            if (matchOfVarInt.isPresent()) {
+                var from = matchOfVarInt.get().from();
+                var to = matchOfVarInt.get().to();
+                var placeholder = matchOfVarInt.get().placeholder();
                 out.printf("Random int id is from `%d` to `%d`%n", from, to);
 
                 for (int i=0; i < number; i++) {
                     var newEndpoint = endpoint.replace(placeholder, randomInt(from, to).toString());
                     producerQueue.put(newEndpoint);
                 }
-            } else {
-                var matcherOfVarUuid = VARIABLE_UUID.matcher(endpoint);
-                if (matcherOfVarUuid.matches()) {
-                    var placeholder = matcherOfVarUuid.group("placeholder");
-                    out.println("Expecting random uuid()");
+                return;
+            }
+
+            var matcherOfVarUuid = tryPathVarPlaceholderPattern(endpoint, VARIABLE_UUID);
+            if (matcherOfVarUuid.isPresent()) {
+                var placeholder = matcherOfVarUuid.get();
+                out.println("Expecting random uuid()");
+                for (int i=0; i < number; i++) {
+                    var newEndpoint = endpoint.replace(placeholder, UUID.randomUUID().toString());
+                    producerQueue.put(newEndpoint);
+                }
+                return;
+            }
+
+            var opt = tryPathVariableFilePattern(endpoint);
+            if (opt.isPresent()) {
+                var placeholder = opt.get().placeholder();
+                out.printf("Expecting random id from file %s\n", opt.get().filePath());
+                try(var reader = new RandomAccessFile(opt.get().filePath(), "r")) {
+                    var atLeastFoundOneLine = false;
                     for (int i=0; i < number; i++) {
-                        var newEndpoint = endpoint.replace(placeholder, UUID.randomUUID().toString());
+                        var line =reader.readLine();
+                        var foundLine = false;
+                        while(!foundLine) {
+                            if (line == null) {
+                                if (!atLeastFoundOneLine) {
+                                    throw new IOException("File cannot be empty!");
+                                }
+                                reader.seek(0);
+                                line =reader.readLine();
+                            }
+
+                            if (line.trim().equals("")) {
+                                line =reader.readLine();
+                                foundLine = false;
+                            } else {
+                                atLeastFoundOneLine = true;
+                                foundLine = true;
+                            }
+                        }
+
+                        var newEndpoint = endpoint.replace(placeholder, line.trim());
                         producerQueue.put(newEndpoint);
                     }
-                } else {
-                    for (int i=0; i < number; i++) {
-                        producerQueue.put(endpoint);
-                    }
+                } catch (IOException e) {
+                    System.err.println(e.getMessage());
+                    e.printStackTrace();
+                    System.exit(1);
                 }
+
+                return;
             }
+
+            // When there is no special pattern for the endpoint
+            for (int i=0; i < number; i++) {
+                producerQueue.put(endpoint);
+            }
+
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
@@ -378,6 +424,45 @@ public class KayWithWebClient {
         }
     }
 
+
+    public static final Optional<PathVariableFile> tryPathVariableFilePattern(final String url) {
+        var m = PathVariableFile.PATTERN.matcher(url);
+        if (m.matches()) {
+            var placeholder = m.group("placeholder");
+            var path = m.group("filePath");
+            return Optional.of(new PathVariableFile(placeholder, path));
+        } else {
+            return Optional.empty();
+        }
+    }
+
+    public static final Optional<String> tryPathVarPlaceholderPattern(final String url, final Pattern p) {
+        var m = p.matcher(url);
+        if (m.matches()) {
+            return Optional.of(m.group("placeholder"));
+        } else {
+            return Optional.empty();
+        }
+    }
+
+    public static final Optional<PathVariableInt> tryPathVariableIntPattern(final String url) {
+        var m = PathVariableInt.PATTERN.matcher(url);
+        if (m.matches()) {
+            var from = Integer.parseInt(m.group("from"));
+            var to = Integer.parseInt(m.group("to"));
+            var placeholder = m.group("placeholder");
+            return Optional.of(new PathVariableInt(placeholder, from, to));
+        } else {
+            return Optional.empty();
+        }
+    }
 }
 
 
+record PathVariableFile(String placeholder, String filePath) {
+    static final Pattern PATTERN = Pattern.compile(".*(?<placeholder>\\{@(?<filePath>[^}]+)}).*");
+}
+
+record PathVariableInt(String placeholder, int from, int to) {
+    static final Pattern PATTERN = Pattern.compile(".*(?<placeholder>\\{int\\((?<from>\\d+)\\s*,\\s*(?<to>\\d+)\\)\\}).*");
+}
