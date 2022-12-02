@@ -3,6 +3,8 @@ package cn.gzten.util;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 
+import java.io.UnsupportedEncodingException;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -39,7 +41,7 @@ public class CliHistogram {
             var blanks = " ".repeat(1 + maxPrefixLength.get() - lineData.prefix.length());
             var percent = lineData.count / ((double)maxCount.get()) * MAX_BLOCK;
 
-            System.out.printf("  %s%s|%s\n", lineData.prefix, blanks, BLOCK.repeat((int) percent));
+            System.out.println(new String("  %s%s|%s".formatted(lineData.prefix, blanks, BLOCK.repeat((int) percent)).getBytes(), StandardCharsets.UTF_8));
         });
 
     }

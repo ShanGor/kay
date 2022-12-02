@@ -58,6 +58,7 @@ public class KayCommand implements Callable<Integer> {
     }
 
     public static void main(String[] args) {
+        System.setProperty("file.encoding", "UTF-8");
         System.exit(new CommandLine(new KayCommand()).execute(args));
     }
 

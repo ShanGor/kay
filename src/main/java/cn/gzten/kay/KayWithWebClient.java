@@ -397,6 +397,7 @@ public class KayWithWebClient {
                 .pendingAcquireMaxCount(concurrentCount).build();
         var httpClient = reactor.netty.http.client.HttpClient.create(connectionProvider)
                 .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 10_000)
+                .followRedirect(true)
                 .responseTimeout(Duration.ofMillis(timeoutMilliseconds))
                 .doOnConnected ( conn ->
                 conn.addHandlerLast(new ReadTimeoutHandler(timeoutMilliseconds, TimeUnit.MILLISECONDS))
