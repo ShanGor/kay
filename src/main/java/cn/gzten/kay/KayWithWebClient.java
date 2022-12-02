@@ -1,5 +1,6 @@
 package cn.gzten.kay;
 
+import cn.gzten.KayCommand;
 import cn.gzten.util.CliHistogram;
 import cn.gzten.util.Pair;
 import cn.gzten.util.ParsedUrl;
@@ -49,22 +50,34 @@ public class KayWithWebClient {
     private final LongAdder taskOverflowCount;
 
     /**
+     * Request HTTP Method.
+     */
+    private String httpMethod;
+
+    /**
+     * Request data, will be required for POST, PUT, PATCH. Not required by GET/DELETE
+     */
+    private String data;
+
+    /**
      * To control the process progress.
      */
     private final CountDownLatch consumerLatch;
 
-    public KayWithWebClient(String url, int concurrentCount, int number, long timeout) {
-        this.totalRequestNumber = number;
+    public KayWithWebClient(KayCommand args) {
+        this.totalRequestNumber = args.getNumber();
+        this.data = args.getData();
+        this.httpMethod = args.getHttpMethod();
 
-        out.printf("Total number of requests: %d\n", number);
-        out.printf("Concurrent: %d%n", concurrentCount);
-        out.printf("URL: %s%n", url);
-        out.printf("Http Timeout: %d seconds%n", timeout);
+        out.printf("Total number of requests: %d\n", args.getNumber());
+        out.printf("Concurrent: %d%n", args.getConcurrency());
+        out.printf("URL: %s%n", args.getUrl());
+        out.printf("Http Timeout: %d seconds%n", args.getTimeout());
         System.setProperty("logging.level.root", "OFF");
 
-        var parsedUrlOpt = ParsedUrl.from(url);
+        var parsedUrlOpt = ParsedUrl.from(args.getUrl());
         if (parsedUrlOpt.isEmpty()) {
-            System.err.printf("Cannot parse url: %s%n", url);
+            System.err.printf("Cannot parse url: %s%n", args.getUrl());
             System.exit(-1);
         }
 
@@ -73,9 +86,9 @@ public class KayWithWebClient {
         out.printf("Base URL: %s%n", parsedUrl.baseUrl());
         out.printf("Endpoint: %s%n", parsedUrl.endpoint());
 
-        httpClient = prepareWebClient(parsedUrl.baseUrl(), timeout, concurrentCount);
+        httpClient = prepareWebClient(parsedUrl.baseUrl(), args.getTimeout(), args.getConcurrency());
         list = new ConcurrentLinkedQueue<>();
-        throttlingQueue = new LinkedBlockingQueue<>(concurrentCount);
+        throttlingQueue = new LinkedBlockingQueue<>(args.getConcurrency());
         errorReport = new ConcurrentHashMap<>();
         requestErrors = new ConcurrentLinkedQueue<>();
 
@@ -83,7 +96,7 @@ public class KayWithWebClient {
 
         taskOverflowCount = new LongAdder();
 
-        consumerLatch = new CountDownLatch(number);
+        consumerLatch = new CountDownLatch(args.getNumber());
     }
 
     public int run(int parallelismToIssueAsyncRequests) throws InterruptedException {

@@ -3,10 +3,14 @@ package cn.gzten;
 
 import cn.gzten.kay.KayWithWebClient;
 import cn.gzten.util.CliHistogram;
+import lombok.Data;
 import picocli.CommandLine;
 
+import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.Callable;
 
+@Data
 @CommandLine.Command(name = "Kay", mixinStandardHelpOptions = true, version = "kay 1.0",
         description = "Peek test tool with parameters like ab / hey!")
 public class KayCommand implements Callable<Integer> {
@@ -32,15 +36,40 @@ public class KayCommand implements Callable<Integer> {
     @CommandLine.Option(names = {"-b", "--histogram-block-char"}, description = "histogram block char, default as *.")
     private String histogramBlock = "*";
 
+    @CommandLine.Option(names = {"-d", "--data"}, description = "post / put data as a string")
+    private String data = "";
+
+    @CommandLine.Option(names = {"-m", "--method"}, description = "Http Method [GET|PUT|POST|DELETE|PATCH], default as GET")
+    private String httpMethod = "GET";
+
+    private static final List<String> VALID_METHODS = List.of("GET", "PUT", "POST", "DELETE", "PATCH");
+
     @Override
     public Integer call() throws Exception {
         CliHistogram.MAX_BLOCK = histogramMaxBlocks;
         CliHistogram.BLOCK = String.valueOf(histogramBlock);
 
-        return new KayWithWebClient(url, concurrency, number, timeout).run(parallelismToIssueAsyncRequests);
+        if(!verifyHttpMethod()) {
+            System.err.printf("Http method provided is not supported: %s\n", httpMethod);
+            System.exit(1);
+        }
+
+        return new KayWithWebClient(this).run(parallelismToIssueAsyncRequests);
     }
 
     public static void main(String[] args) {
         System.exit(new CommandLine(new KayCommand()).execute(args));
+    }
+
+    private boolean verifyHttpMethod() {
+        for(String method : VALID_METHODS) {
+            if (method.equals(httpMethod.trim().toUpperCase(Locale.ROOT))) {
+                if (!method.equals(httpMethod)) {
+                    httpMethod = method;
+                }
+                return true;
+            }
+        }
+        return false;
     }
 }
