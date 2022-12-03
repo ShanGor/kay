@@ -1,4 +1,5 @@
-# Load Runner by Kotlin
+# Load Runner by Java
+Inspired by rakyll/hey. While the `hey` program, does not support path variable. This `Kay` can  do that.
 
 ## Build
 - Build with maven first
