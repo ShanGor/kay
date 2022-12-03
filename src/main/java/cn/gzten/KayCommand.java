@@ -36,7 +36,7 @@ public class KayCommand implements Callable<Integer> {
     @CommandLine.Option(names = {"-b", "--histogram-block-char"}, description = "histogram block char, default as *.")
     private String histogramBlock = "*";
 
-    @CommandLine.Option(names = {"-d", "--data"}, description = "post / put data as a string")
+    @CommandLine.Option(names = {"-d", "--data"}, description = "post / put data as a string, or a file with URI like file:///c:/tmp/my.json")
     private String data = null;
 
     @CommandLine.Option(names = {"-m", "--method"}, description = "Http Method [GET|PUT|POST|DELETE|PATCH], default as GET")
