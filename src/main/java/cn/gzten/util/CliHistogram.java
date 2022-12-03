@@ -41,7 +41,8 @@ public class CliHistogram {
             var blanks = " ".repeat(1 + maxPrefixLength.get() - lineData.prefix.length());
             var percent = lineData.count / ((double)maxCount.get()) * MAX_BLOCK;
 
-            System.out.println(new String("  %s%s|%s".formatted(lineData.prefix, blanks, BLOCK.repeat((int) percent)).getBytes(), StandardCharsets.UTF_8));
+            var histogramLine = "  %s%s|%s".formatted(lineData.prefix, blanks, BLOCK.repeat((int) percent));
+            System.out.println(new String(histogramLine.getBytes(), StandardCharsets.UTF_8));
         });
 
     }

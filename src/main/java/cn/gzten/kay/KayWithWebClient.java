@@ -9,14 +9,19 @@ import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import io.netty.handler.timeout.ReadTimeoutHandler;
 import io.netty.handler.timeout.WriteTimeoutHandler;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
+import org.springframework.web.reactive.function.BodyInserters;
+import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.SignalType;
 import reactor.netty.resources.ConnectionProvider;
 
 import javax.net.ssl.SSLException;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.text.MessageFormat;
@@ -25,6 +30,9 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
+import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
 import static java.lang.System.out;
@@ -59,15 +67,23 @@ public class KayWithWebClient {
      */
     private String data;
 
+    private String[] httpHeaders;
+
     /**
      * To control the process progress.
      */
     private final CountDownLatch consumerLatch;
 
-    public KayWithWebClient(KayCommand args) {
+    public KayWithWebClient(KayCommand args) throws IOException {
         this.totalRequestNumber = args.getNumber();
-        this.data = args.getData();
         this.httpMethod = args.getHttpMethod();
+        if (args.getData().startsWith("file:///")) {
+            this.data = Files.readString(Paths.get(URI.create(args.getData())));
+        } else {
+            this.data = args.getData();
+        }
+        httpHeaders = args.getHttpHeaders();
+
 
         out.printf("Total number of requests: %d\n", args.getNumber());
         out.printf("Concurrent: %d%n", args.getConcurrency());
@@ -132,12 +148,14 @@ public class KayWithWebClient {
 
             var startTime = System.currentTimeMillis();
 
-            httpClient.get().uri(currentEndpoint).exchangeToMono (resp -> {
+            Function<ClientResponse, Mono<Object>> onNormal = (resp) -> {
                 var status = resp.statusCode().value();
 
                 onCompleteOrException(status, startTime, list, requestErrors, null);
                 return Mono.empty();
-            }).onErrorComplete (e-> {
+            };
+
+            Predicate<? super Throwable> onError = (e) -> {
                 int status;
                 if (e.getMessage() != null && e.getMessage().startsWith("Connection refused")){
                     status = 503;
@@ -147,7 +165,9 @@ public class KayWithWebClient {
 
                 onCompleteOrException(status, startTime, list, requestErrors, e);
                 return true;
-            }).doFinally (signalType -> {
+            };
+
+            Consumer<SignalType> onFinally = (signalType) -> {
                 try {
                     throttlingQueue.take();
                     var percentage = roundTo2Digits(consumerLatch.getCount() * 100.0 / totalRequestNumber);
@@ -160,7 +180,45 @@ public class KayWithWebClient {
                 } finally {
                     consumerLatch.countDown();
                 }
-            }).subscribe();
+            };
+
+            switch (httpMethod) {
+                case "POST" -> {
+                    httpClient.post().uri(currentEndpoint).headers(headerBuilder)
+                            .body(BodyInserters.fromValue(data))
+                            .exchangeToMono(onNormal)
+                            .onErrorComplete (onError)
+                            .doFinally (onFinally).subscribe();
+                }
+                case "PUT" -> {
+                    httpClient.put().uri(currentEndpoint).headers(headerBuilder)
+                            .body(BodyInserters.fromValue(data))
+                            .exchangeToMono(onNormal)
+                            .onErrorComplete (onError)
+                            .doFinally (onFinally).subscribe();
+                }
+                case "PATCH" -> {
+                    httpClient.patch().uri(currentEndpoint).headers(headerBuilder)
+                            .body(BodyInserters.fromValue(data))
+                            .exchangeToMono(onNormal)
+                            .onErrorComplete (onError)
+                            .doFinally (onFinally).subscribe();
+                }
+                case "DELETE" -> {
+                    httpClient.delete().uri(currentEndpoint).headers(headerBuilder)
+                            .exchangeToMono(onNormal)
+                            .onErrorComplete (onError)
+                            .doFinally (onFinally).subscribe();
+                }
+                case "GET", default -> {
+                    httpClient.get().uri(currentEndpoint).headers(headerBuilder)
+                            .exchangeToMono(onNormal)
+                            .onErrorComplete (onError)
+                            .doFinally (onFinally).subscribe();
+                }
+            }
+
+
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
@@ -231,6 +289,7 @@ public class KayWithWebClient {
         }
     }
 
+
     public static final List<Pair<String, Long>> statLatencyDistribution(Collection<Pair<Integer, Long>> list) {
         var result = new LinkedList<Pair<String, Long>>();
         var latencies = list.stream().filter(p -> p.first() < 500)
@@ -240,6 +299,7 @@ public class KayWithWebClient {
 
         var total = latencies.size();
         switch (total) {
+            case 0-> result.add(new Pair<>("0%", 0L));
             case 1 -> result.add(new Pair<>("100%", latencies.get(0)));
             case 2 -> {
                 result.add(new Pair<>("50%", latencies.get(0)));
@@ -390,7 +450,25 @@ public class KayWithWebClient {
         }
     }
 
-    public static final WebClient prepareWebClient(String baseUrl, long timeout, int concurrentCount) {
+    /**
+     * Found that the client level headers will not help on the 415 error code.
+     * So we have to make this and provide to the request level.
+     */
+    Consumer<HttpHeaders> headerBuilder = (headers) -> {
+        for (var header : this.httpHeaders) {
+            int pos = header.indexOf(':');
+            String key = header.substring(0, pos);
+            String value;
+            if (key.length() + 1 == header.length()) {
+                value = "";
+            } else {
+                value = header.substring(pos + 1).trim();
+            }
+            headers.add(key, value);
+        }
+    };
+
+    public WebClient prepareWebClient(String baseUrl, long timeout, int concurrentCount) {
         var timeoutMilliseconds = timeout * 1000L;
         var connectionProvider = ConnectionProvider.builder("myConnectionPool")
                 .maxConnections(concurrentCount)

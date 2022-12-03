@@ -91,10 +91,16 @@
   ```
   pgm -n <number> -c <concurrency> http://localhost:8080/reports/{@ids.txt}
   ```
+- Support http methods [GET|PUT|POST|DELETE|PATCH]
+  ```
+  pgm -n <number> -c <concurrency> http://localhost:8080/test/1 -m DELETE
+  ```
+- Supports -d "my data" format
+  ```
+  pgm -n <number> -c <concurrency> http://localhost:8080/test -d "{\"message\", \"good\"}" -H "Content-Type: application/json" -H "Authorization: ..."
+  ```
 
-## TODO
-- to support http methods
-- to support -d "my data" format
-- to support -d @file format, will load the data to post
-- to support `-d @file -l true` format, will loop the file to produce requests  
-  If the total number of counts not equal to the row count, trust total number as `-n <number>`. Unless you set `-n 0`, then will set total number as the total line count of the file.
+- Supports `-d file:///c:/tmp/my.json` format, will load the data to post
+  ```
+  pgm -n 10000 -c 200 http://localhost:8080/test -d "file:///C:/tmp/hey.txt" -H "content-type: application/json"
+  ```

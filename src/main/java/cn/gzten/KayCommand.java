@@ -37,10 +37,13 @@ public class KayCommand implements Callable<Integer> {
     private String histogramBlock = "*";
 
     @CommandLine.Option(names = {"-d", "--data"}, description = "post / put data as a string")
-    private String data = "";
+    private String data = null;
 
     @CommandLine.Option(names = {"-m", "--method"}, description = "Http Method [GET|PUT|POST|DELETE|PATCH], default as GET")
-    private String httpMethod = "GET";
+    private String httpMethod = null;
+
+    @CommandLine.Option(names = {"-H", "--header"}, description = "Http Header")
+    private String[] httpHeaders = {};
 
     private static final List<String> VALID_METHODS = List.of("GET", "PUT", "POST", "DELETE", "PATCH");
 
@@ -49,9 +52,20 @@ public class KayCommand implements Callable<Integer> {
         CliHistogram.MAX_BLOCK = histogramMaxBlocks;
         CliHistogram.BLOCK = String.valueOf(histogramBlock);
 
-        if(!verifyHttpMethod()) {
-            System.err.printf("Http method provided is not supported: %s\n", httpMethod);
-            System.exit(1);
+        if (httpMethod==null) {
+            if (data != null) {
+                httpMethod = "POST";
+            } else {
+                httpMethod = "GET";
+            }
+        } else {
+            if (!verifyHttpMethod()) {
+                System.err.printf("Http method provided is not supported: %s\n", httpMethod);
+                System.exit(1);
+            }
+        }
+        if (data == null) {
+            data = "";
         }
 
         return new KayWithWebClient(this).run(parallelismToIssueAsyncRequests);
